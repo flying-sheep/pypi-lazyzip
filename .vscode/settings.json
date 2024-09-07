@@ -1,0 +1,17 @@
+{
+    "[python][rust]": {
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "always",
+            "source.organizeImports": "always",
+        },
+    },
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+    },
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    },
+    "notebook.formatOnSave.enabled": true,
+    "python.analysis.typeCheckingMode": "basic",
+}
