@@ -1,9 +1,9 @@
-use std::{collections::HashMap, ffi::OsStr, path::PathBuf, str::FromStr, sync::LazyLock};
+use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::LazyLock};
 
 use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
-use color_eyre::eyre::{bail, Context, ContextCompat, Result};
+use color_eyre::eyre::{bail, Context, ContextCompat, Error, OptionExt, Result};
 use reqwest::{header::HeaderMap, Url};
 use serde::{de::Error as _, Deserialize, Deserializer};
 use tokio::io::{AsyncRead, AsyncSeek};
@@ -28,7 +28,7 @@ struct Meta {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "kebab-case")]
 struct File {
-    filename: PathBuf,
+    filename: String,
     #[serde(deserialize_with = "deserialize_url")]
     url: Url,
     hashes: HashMap<String, String>,
@@ -63,40 +63,65 @@ where
     }))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Identifier(String);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct PackageName(String);
 
 /// Regex matching strings that start with valid Python package identifiers
 static ID_START_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)^[A-Z0-9][A-Z0-9._-]*[A-Z0-9]|[A-Z0-9]").unwrap());
 
-impl FromStr for Identifier {
-    type Err = color_eyre::eyre::Error;
+impl FromStr for PackageName {
+    type Err = Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         // If the match is not as long as the whole thing, there is more after
         if !ID_START_RE.find(s).is_some_and(|m| m.len() == s.len()) {
             bail!("invalid identifier");
         }
-        Ok(Identifier(caseless::default_case_fold_str(s)))
+        Ok(PackageName(caseless::default_case_fold_str(s)))
     }
 }
 
-impl Into<String> for Identifier {
+impl Into<String> for PackageName {
     fn into(self) -> String {
         self.0
     }
 }
 
-impl ToString for Identifier {
+impl ToString for PackageName {
     fn to_string(&self) -> String {
         self.0.clone()
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WheelFilename {
+    pub name: PackageName,
+    pub version: pep440_rs::Version,
+    tags: String, // e.g. "py3-none-any"
+}
+
+impl FromStr for WheelFilename {
+    type Err = Error;
+
+    fn from_str(filename: &str) -> Result<Self, Self::Err> {
+        let stem = filename
+            .strip_suffix(".whl")
+            .ok_or_eyre("not a .whl file")?;
+        let &[name, version, tags] = stem.splitn(3, '-').collect::<Vec<_>>().as_slice() else {
+            bail!("invalid wheel filename: {stem}");
+        };
+        Ok(WheelFilename {
+            name: PackageName::from_str(name)?,
+            version: pep440_rs::Version::from_str(version)?,
+            tags: tags.to_string(),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 enum PkgLoc {
-    Name(Identifier, Option<pep440_rs::VersionSpecifier>),
+    Name(PackageName, Option<pep440_rs::VersionSpecifier>),
     Path(PathBuf),
 }
 
@@ -111,14 +136,14 @@ impl PkgLoc {
             .transpose()
             .with_context(|| format!("could not parse version from {rest}"))?;
         Ok(PkgLoc::Name(
-            Identifier::from_str(name.as_str())?,
+            PackageName::from_str(name.as_str())?,
             version_spec,
         ))
     }
 }
 
 impl FromStr for PkgLoc {
-    type Err = color_eyre::eyre::Error;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::from_name(s).or_else(|_| Ok(PkgLoc::Path(PathBuf::from(s))))
@@ -142,9 +167,6 @@ async fn main() -> Result<()> {
 
     let reader: Box<dyn AsyncRS> = match args.pkg_loc {
         PkgLoc::Name(name, version_spec) => {
-            if !version_spec.is_none() {
-                todo!();
-            }
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
             let pkg: Package = client
                 .get(format!("https://pypi.org/simple/{}/", name.to_string()))
@@ -155,11 +177,24 @@ async fn main() -> Result<()> {
                 .json()
                 .await?;
 
-            let whl = pkg
+            let mut whls: Vec<_> = pkg
                 .files
                 .into_iter()
-                .find(|p| p.filename.extension() == Some(OsStr::new("whl")))
-                .context("No .whl file found")?;
+                .filter_map(|p| {
+                    let n = WheelFilename::from_str(&p.filename).ok()?;
+                    if version_spec
+                        .as_ref()
+                        .is_none_or(|version_spec| version_spec.contains(&n.version))
+                    {
+                        Some((n, p))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            whls.sort_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version));
+            let (_, whl) = whls.drain(..).rev().next().context("No wheel found")?;
+            dbg!(&whl.filename);
 
             let (reader, _headers) = AsyncHttpRangeReader::new(
                 client,
