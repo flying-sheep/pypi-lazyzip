@@ -96,7 +96,7 @@ impl ToString for Identifier {
 
 #[derive(Debug, Clone)]
 enum PkgLoc {
-    Name(Identifier, Option<pep440_rs::Version>),
+    Name(Identifier, Option<pep440_rs::VersionSpecifier>),
     Path(PathBuf),
 }
 
@@ -106,11 +106,14 @@ impl PkgLoc {
             bail!("invalid identifier");
         };
         let rest = &s[name.len()..];
-        let version = (!rest.is_empty())
-            .then(|| pep440_rs::Version::from_str(rest))
+        let version_spec = (!rest.is_empty())
+            .then(|| pep440_rs::VersionSpecifier::from_str(&rest))
             .transpose()
             .with_context(|| format!("could not parse version from {rest}"))?;
-        Ok(PkgLoc::Name(Identifier::from_str(name.as_str())?, version))
+        Ok(PkgLoc::Name(
+            Identifier::from_str(name.as_str())?,
+            version_spec,
+        ))
     }
 }
 
@@ -138,8 +141,8 @@ async fn main() -> Result<()> {
     let args = Cli::try_parse()?;
 
     let reader: Box<dyn AsyncRS> = match args.pkg_loc {
-        PkgLoc::Name(name, version) => {
-            if !version.is_none() {
+        PkgLoc::Name(name, version_spec) => {
+            if !version_spec.is_none() {
                 todo!();
             }
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
@@ -194,4 +197,23 @@ async fn main() -> Result<()> {
         .await?;
     println!("{buf}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_str() {
+        assert!(matches!(PkgLoc::from_str("foo"), Ok(PkgLoc::Name(_, None))));
+        assert!(matches!(
+            PkgLoc::from_str("foo==1.0"),
+            Ok(PkgLoc::Name(_, _))
+        ));
+        assert!(matches!(
+            PkgLoc::from_str("foo ==1.0.1"),
+            Ok(PkgLoc::Name(_, _))
+        ));
+        // all else are path
+    }
 }
