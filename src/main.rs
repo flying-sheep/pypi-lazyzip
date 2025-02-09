@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::OsStr, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, ffi::OsStr, path::PathBuf};
 
 use async_zip::base::read::seek::ZipFileReader;
 use color_eyre::eyre::{ContextCompat, Result};
