@@ -1,10 +1,10 @@
 use std::{collections::HashMap, ffi::OsStr, path::PathBuf};
 
+use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
 use async_zip::base::read::seek::ZipFileReader;
 use color_eyre::eyre::{ContextCompat, Result};
-use reqwest::Url;
+use reqwest::{header::HeaderMap, Url};
 use serde::{de::Error as _, Deserialize, Deserializer};
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek};
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
@@ -61,77 +61,6 @@ where
     }))
 }
 
-struct RangeReader {
-    client: reqwest::Client,
-    url: Url,
-    content_length: Option<u64>,
-    offset: u64,
-}
-impl RangeReader {
-    async fn new(client: reqwest::Client, url: Url) -> Result<Self> {
-        let head = client.head(url.clone()).send().await?.error_for_status()?;
-
-        Ok(Self {
-            client,
-            url,
-            content_length: head
-                .headers()
-                .get("content-length")
-                .and_then(|h| h.to_str().ok())
-                .and_then(|h| h.parse().ok()),
-            offset: 0,
-        })
-    }
-}
-
-impl AsyncRead for RangeReader {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        dbg!(self.offset, self.content_length);
-        todo!()
-    }
-}
-
-impl AsyncSeek for RangeReader {
-    fn start_seek(
-        self: std::pin::Pin<&mut Self>,
-        position: std::io::SeekFrom,
-    ) -> std::io::Result<()> {
-        self.get_mut().offset = match position {
-            std::io::SeekFrom::Start(offset) => offset,
-            std::io::SeekFrom::Current(offset) => self.offset.saturating_add_signed(offset),
-            std::io::SeekFrom::End(offset) => self
-                .content_length
-                .ok_or_else(|| std::io::ErrorKind::InvalidInput)?
-                .saturating_add_signed(offset),
-        };
-        Ok(())
-    }
-
-    fn poll_complete(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<u64>> {
-        std::task::Poll::Ready(Ok(self.offset))
-    }
-}
-
-impl AsyncBufRead for RangeReader {
-    fn poll_fill_buf(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<&[u8]>> {
-        todo!()
-    }
-
-    fn consume(self: std::pin::Pin<&mut Self>, amt: usize) {
-        todo!()
-    }
-}
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     color_eyre::install()?;
@@ -154,14 +83,21 @@ async fn main() -> Result<()> {
         .find(|p| p.filename.extension() == Some(OsStr::new("whl")))
         .context("No .whl file found")?;
 
-    let reader = RangeReader::new(client, whl.url).await?;
-    let mut r = ZipFileReader::with_tokio(reader).await?;
+    let (reader, _headers) =
+        AsyncHttpRangeReader::new(client, whl.url, CheckSupportMethod::Head, HeaderMap::new())
+            .await?;
+    let buf_reader = tokio::io::BufReader::new(reader);
+    let mut r = ZipFileReader::with_tokio(buf_reader).await?;
     let idx_entry = r
         .file()
         .entries()
         .into_iter()
         .enumerate()
-        .find(|(_, e)| e.filename().as_str().ok() == Some("top_level.txt"))
+        .find(|(_, e)| {
+            e.filename()
+                .as_str()
+                .is_ok_and(|n| n.ends_with("/top_level.txt"))
+        })
         .map(|(i, _)| i)
         .context("No top_level.txt file found")?;
 
@@ -170,5 +106,6 @@ async fn main() -> Result<()> {
         .await?
         .read_to_string_checked(&mut buf)
         .await?;
+    println!("{buf}");
     Ok(())
 }
