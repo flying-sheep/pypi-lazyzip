@@ -51,34 +51,7 @@ async fn main() -> Result<()> {
     let reader: Box<dyn AsyncRS> = match args.pkg_loc {
         PkgLoc::Name(name, version_spec) => {
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
-            let pkg: Package = client
-                .get(format!("https://pypi.org/simple/{name}/"))
-                .header("Accept", "application/vnd.pypi.simple.v1+json")
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-
-            let mut whls: Vec<_> = pkg
-                .files
-                .into_iter()
-                .filter_map(|p| {
-                    let n = WheelFilename::from_str(&p.filename).ok()?;
-                    if !&p.yanked
-                        && version_spec
-                            .as_ref()
-                            .is_none_or(|version_spec| version_spec.contains(&n.version))
-                    {
-                        Some((n, p))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            whls.sort_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version));
-            let (_, whl) = whls.drain(..).next_back().context("No wheel found")?;
-
+            let whl = find_wheel(&client, name, version_spec).await?;
             let (reader, _headers) = AsyncHttpRangeReader::new(
                 client,
                 whl.url,
@@ -115,4 +88,39 @@ async fn main() -> Result<()> {
         .await?;
     println!("{buf}");
     Ok(())
+}
+
+async fn find_wheel(
+    client: &reqwest::Client,
+    name: PackageName,
+    version_spec: Option<pep440_rs::VersionSpecifier>,
+) -> Result<pypi::File> {
+    let pkg: Package = client
+        .get(format!("https://pypi.org/simple/{name}/"))
+        .header("Accept", "application/vnd.pypi.simple.v1+json")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let mut whls: Vec<_> = pkg
+        .files
+        .into_iter()
+        .filter_map(|p| {
+            let n = WheelFilename::from_str(&p.filename).ok()?;
+            if !&p.yanked
+                && version_spec
+                    .as_ref()
+                    .is_none_or(|version_spec| version_spec.contains(&n.version))
+            {
+                Some((n, p))
+            } else {
+                None
+            }
+        })
+        .collect();
+    whls.sort_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version));
+    let (_, whl) = whls.drain(..).next_back().context("No wheel found")?;
+    Ok(whl)
 }
