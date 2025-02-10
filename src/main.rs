@@ -104,7 +104,7 @@ async fn find_wheel(
         .json()
         .await?;
 
-    let mut whls: Vec<_> = pkg
+    let (_, whl) = pkg
         .files
         .into_iter()
         .filter_map(|p| {
@@ -119,8 +119,8 @@ async fn find_wheel(
                 None
             }
         })
-        .collect();
-    whls.sort_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version));
-    let (_, whl) = whls.drain(..).next_back().context("No wheel found")?;
+        .max_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version))
+        .context("No wheel found")?;
+
     Ok(whl)
 }
