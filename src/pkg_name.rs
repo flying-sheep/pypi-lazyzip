@@ -69,3 +69,17 @@ pub fn parse_dependency(s: &str) -> Result<(PackageName, Option<pep440_rs::Versi
         .with_context(|| format!("could not parse version from {rest}"))?;
     Ok((PackageName::from_str(name.as_str())?, version_spec))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_str() {
+        assert!(matches!(parse_dependency("foo"), Ok((_, None))));
+        assert!(matches!(parse_dependency("foo==1.0"), Ok(_)));
+        assert!(matches!(parse_dependency("foo ==1.0.1"), Ok(_)));
+        assert!(matches!(parse_dependency("foo!!1.0"), Err(_)));
+        assert!(matches!(parse_dependency("-_==1.0"), Err(_)));
+    }
+}

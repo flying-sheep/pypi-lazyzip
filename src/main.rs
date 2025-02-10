@@ -114,22 +114,3 @@ async fn main() -> Result<()> {
     println!("{buf}");
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_from_str() {
-        assert!(matches!(PkgLoc::from_str("foo"), Ok(PkgLoc::Name(_, None))));
-        assert!(matches!(
-            PkgLoc::from_str("foo==1.0"),
-            Ok(PkgLoc::Name(_, _))
-        ));
-        assert!(matches!(
-            PkgLoc::from_str("foo ==1.0.1"),
-            Ok(PkgLoc::Name(_, _))
-        ));
-        // all else are path
-    }
-}
