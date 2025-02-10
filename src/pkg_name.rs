@@ -1,5 +1,6 @@
-use std::{str::FromStr, sync::LazyLock};
+use std::{fmt::Display, str::FromStr, sync::LazyLock};
 
+use caseless::Caseless;
 use color_eyre::eyre::{bail, Context as _, Error, OptionExt as _, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -14,22 +15,27 @@ impl FromStr for PackageName {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         // If the match is not as long as the whole thing, there is more after
-        if !ID_START_RE.find(s).is_some_and(|m| m.len() == s.len()) {
+        if ID_START_RE.find(s).is_none_or(|m| m.len() != s.len()) {
             bail!("invalid identifier");
         }
-        Ok(PackageName(caseless::default_case_fold_str(s)))
+        Ok(PackageName(
+            s.chars()
+                .default_case_fold()
+                .map(|c| if c == '_' { '-' } else { c })
+                .collect(),
+        ))
     }
 }
 
-impl Into<String> for PackageName {
-    fn into(self) -> String {
-        self.0
+impl From<PackageName> for String {
+    fn from(value: PackageName) -> Self {
+        value.0
     }
 }
 
-impl ToString for PackageName {
-    fn to_string(&self) -> String {
-        self.0.clone()
+impl Display for PackageName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -64,7 +70,7 @@ pub fn parse_dependency(s: &str) -> Result<(PackageName, Option<pep440_rs::Versi
     };
     let rest = &s[name.len()..];
     let version_spec = (!rest.is_empty())
-        .then(|| pep440_rs::VersionSpecifier::from_str(&rest))
+        .then(|| pep440_rs::VersionSpecifier::from_str(rest))
         .transpose()
         .with_context(|| format!("could not parse version from {rest}"))?;
     Ok((PackageName::from_str(name.as_str())?, version_spec))

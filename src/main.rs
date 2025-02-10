@@ -1,3 +1,5 @@
+#![deny(clippy::pedantic)]
+
 use std::{path::PathBuf, str::FromStr};
 
 use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
@@ -50,7 +52,7 @@ async fn main() -> Result<()> {
         PkgLoc::Name(name, version_spec) => {
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
             let pkg: Package = client
-                .get(format!("https://pypi.org/simple/{}/", name.to_string()))
+                .get(format!("https://pypi.org/simple/{name}/"))
                 .header("Accept", "application/vnd.pypi.simple.v1+json")
                 .send()
                 .await?
@@ -63,9 +65,10 @@ async fn main() -> Result<()> {
                 .into_iter()
                 .filter_map(|p| {
                     let n = WheelFilename::from_str(&p.filename).ok()?;
-                    if version_spec
-                        .as_ref()
-                        .is_none_or(|version_spec| version_spec.contains(&n.version))
+                    if !&p.yanked
+                        && version_spec
+                            .as_ref()
+                            .is_none_or(|version_spec| version_spec.contains(&n.version))
                     {
                         Some((n, p))
                     } else {
@@ -74,8 +77,7 @@ async fn main() -> Result<()> {
                 })
                 .collect();
             whls.sort_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version));
-            let (_, whl) = whls.drain(..).rev().next().context("No wheel found")?;
-            dbg!(&whl.filename);
+            let (_, whl) = whls.drain(..).next_back().context("No wheel found")?;
 
             let (reader, _headers) = AsyncHttpRangeReader::new(
                 client,
@@ -96,7 +98,7 @@ async fn main() -> Result<()> {
     let idx_entry = r
         .file()
         .entries()
-        .into_iter()
+        .iter()
         .enumerate()
         .find(|(_, e)| {
             e.filename()

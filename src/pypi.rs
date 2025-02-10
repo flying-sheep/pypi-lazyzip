@@ -33,9 +33,8 @@ pub struct File {
     pub dist_info_metadata: bool,
     #[serde(default)]
     pub gpg_sig: bool,
-    /// `Some(maybe_reason)` if yanked, else `None`
     #[serde(default, deserialize_with = "reason")]
-    pub yanked: Option<Option<String>>,
+    pub yanked: Yanking,
 }
 
 fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
@@ -46,15 +45,33 @@ where
     url.parse().map_err(D::Error::custom)
 }
 
-fn reason<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum Yanking {
+    Yanked(Option<String>),
+    #[default]
+    NotYanked,
+}
+
+impl std::ops::Not for &Yanking {
+    type Output = bool;
+
+    fn not(self) -> Self::Output {
+        matches!(self, &Yanking::NotYanked)
+    }
+}
+
+fn reason<'de, D>(deserializer: D) -> Result<Yanking, D::Error>
 where
     D: Deserializer<'de>,
 {
     let reason: Option<either::Either<String, bool>> =
         either::serde_untagged_optional::deserialize(deserializer)?;
-    Ok(reason.and_then(|maybe_reason| match maybe_reason {
-        either::Either::Left(reason) => Some(Some(reason)),
-        either::Either::Right(true) => Some(None),
-        either::Either::Right(false) => None,
-    }))
+    let Some(maybe_reason) = reason else {
+        return Ok(Yanking::NotYanked);
+    };
+    Ok(match maybe_reason {
+        either::Either::Left(reason) => Yanking::Yanked(Some(reason)),
+        either::Either::Right(true) => Yanking::Yanked(None),
+        either::Either::Right(false) => Yanking::NotYanked,
+    })
 }
