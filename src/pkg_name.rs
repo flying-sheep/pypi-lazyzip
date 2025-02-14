@@ -83,9 +83,9 @@ mod tests {
     #[test]
     fn test_from_str() {
         assert!(matches!(parse_dependency("foo"), Ok((_, None))));
-        assert!(matches!(parse_dependency("foo==1.0"), Ok(_)));
-        assert!(matches!(parse_dependency("foo ==1.0.1"), Ok(_)));
-        assert!(matches!(parse_dependency("foo!!1.0"), Err(_)));
-        assert!(matches!(parse_dependency("-_==1.0"), Err(_)));
+        assert!(matches!(parse_dependency("foo==1.0"), Ok((_, Some(_)))));
+        assert!(matches!(parse_dependency("foo ==1.0.1"), Ok((_, Some(_)))));
+        assert!(parse_dependency("foo!!1.0").is_err());
+        assert!(parse_dependency("-_==1.0").is_err());
     }
 }
