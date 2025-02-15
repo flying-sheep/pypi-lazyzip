@@ -7,8 +7,9 @@ use async_zip::base::read::seek::ZipFileReader;
 use async_zip::StoredZipEntry;
 use clap::Parser;
 use color_eyre::eyre::{Context as _, ContextCompat, Error, Result};
-use futures_lite::io::BufReader;
-use futures_lite::{AsyncBufRead, AsyncRead, AsyncSeek};
+use futures::io::BufReader;
+use futures::stream::FuturesOrdered;
+use futures::{AsyncBufRead, AsyncRead, AsyncSeek, TryStreamExt as _};
 use reqwest::header::HeaderMap;
 use tokio_util::compat::TokioAsyncReadCompatExt as _;
 use tracing::instrument::Instrument as _;
@@ -54,7 +55,7 @@ impl FromStr for PkgLoc {
 
 #[derive(clap::Parser)]
 struct Cli {
-    pkg_loc: PkgLoc,
+    pkg_locs: Vec<PkgLoc>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -68,27 +69,46 @@ async fn main() -> Result<()> {
 
     let args = Cli::try_parse()?;
 
-    let reader = pkg_reader(args.pkg_loc).await?;
+    let contents = args
+        .pkg_locs
+        .into_iter()
+        .map(extract)
+        .collect::<FuturesOrdered<_>>()
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    serde_json::to_writer(std::io::stdout(), &contents)?;
+    Ok(())
+}
+
+#[tracing::instrument(fields(pkg_loc = %pkg_loc))]
+async fn extract(pkg_loc: PkgLoc) -> Result<Vec<String>> {
+    let reader = pkg_reader(pkg_loc).await?;
     let buf_reader = BufReader::new(reader);
     let mut zip_reader = ZipFileReader::new(buf_reader)
         .instrument(tracing::info_span!("create_zip_reader"))
         .await?;
-    let idx_entry = find_entry(&mut zip_reader, |e| {
+    let Some(idx_entry) = find_entry(&mut zip_reader, |e| {
         e.filename()
             .as_str()
             .is_ok_and(|n| n.ends_with("/top_level.txt"))
-    })?;
+    }) else {
+        return Ok(Vec::new());
+    };
     let mut buf = String::new();
     read_entry(&mut zip_reader, idx_entry, &mut buf).await?;
-    println!("{buf}");
-    Ok(())
+    let v = buf
+        .split_terminator('\n')
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    Ok(v)
 }
 
 trait AsyncRS: AsyncRead + AsyncSeek + Unpin {}
 
 impl<R> AsyncRS for R where R: AsyncRead + AsyncSeek + Unpin {}
 
-#[tracing::instrument(fields(pkg_loc = %pkg_loc))]
+#[tracing::instrument(skip_all)]
 async fn pkg_reader(pkg_loc: PkgLoc) -> Result<Box<dyn AsyncRS>> {
     match pkg_loc {
         PkgLoc::Name(name, version_spec) => {
@@ -138,7 +158,7 @@ async fn find_wheel(
 fn find_entry<R>(
     reader: &mut ZipFileReader<R>,
     predicate: fn(&StoredZipEntry) -> bool,
-) -> Result<usize>
+) -> Option<usize>
 where
     R: AsyncBufRead + AsyncSeek + Unpin,
 {
@@ -149,7 +169,6 @@ where
         .enumerate()
         .find(|(_, e)| predicate(e))
         .map(|(i, _)| i)
-        .context("No entry matching predicate found")
 }
 
 #[tracing::instrument(skip(reader, buf))]
