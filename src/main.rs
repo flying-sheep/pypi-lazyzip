@@ -6,8 +6,10 @@ use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
 use color_eyre::eyre::{Context as _, ContextCompat, Error, Result};
+use futures_lite::io::BufReader;
+use futures_lite::{AsyncBufRead, AsyncRead, AsyncSeek};
 use reqwest::header::HeaderMap;
-use tokio::io::{AsyncRead, AsyncSeek};
+use tokio_util::compat::TokioAsyncReadCompatExt as _;
 use tracing::instrument::Instrument as _;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
@@ -70,30 +72,18 @@ async fn main() -> Result<()> {
             )
             .instrument(tracing::info_span!("create_range_reader"))
             .await?;
-            Box::new(reader)
+            Box::new(reader.compat())
         }
         PkgLoc::Path(path) => {
             let reader = tokio::fs::File::open(path).await?;
-            Box::new(reader)
+            Box::new(reader.compat())
         }
     };
-    let buf_reader = tokio::io::BufReader::new(reader);
-    let mut zip_reader = ZipFileReader::with_tokio(buf_reader)
+    let buf_reader = BufReader::new(reader);
+    let mut zip_reader = ZipFileReader::new(buf_reader)
         .instrument(tracing::info_span!("create_zip_reader"))
         .await?;
-    let idx_entry = zip_reader
-        .file()
-        .entries()
-        .iter()
-        .enumerate()
-        .find(|(_, e)| {
-            e.filename()
-                .as_str()
-                .is_ok_and(|n| n.ends_with("/top_level.txt"))
-        })
-        .map(|(i, _)| i)
-        .context("No top_level.txt file found")?;
-
+    let idx_entry = find_entry(&mut zip_reader)?;
     let mut buf = String::new();
     read_entry(&mut zip_reader, idx_entry, &mut buf).await?;
     println!("{buf}");
@@ -126,10 +116,28 @@ async fn find_wheel(
         .with_context(|| format!("No wheel found for {name} {version_spec:?}"))
 }
 
+fn find_entry<R>(reader: &mut ZipFileReader<R>) -> Result<usize>
+where
+    R: AsyncBufRead + AsyncSeek + Unpin,
+{
+    reader
+        .file()
+        .entries()
+        .iter()
+        .enumerate()
+        .find(|(_, e)| {
+            e.filename()
+                .as_str()
+                .is_ok_and(|n| n.ends_with("/top_level.txt"))
+        })
+        .map(|(i, _)| i)
+        .context("No top_level.txt file found")
+}
+
 #[tracing::instrument(skip(reader, buf))]
 async fn read_entry<R>(reader: &mut ZipFileReader<R>, idx: usize, buf: &mut String) -> Result<usize>
 where
-    R: futures_lite::io::AsyncBufRead + futures_lite::io::AsyncSeek + Unpin,
+    R: AsyncBufRead + AsyncSeek + Unpin,
 {
     reader
         .reader_with_entry(idx)
