@@ -72,7 +72,13 @@ async fn main() -> Result<()> {
     let contents = args
         .pkg_locs
         .into_iter()
-        .map(extract)
+        .map(|e| {
+            extract(e, |e| {
+                e.filename()
+                    .as_str()
+                    .is_ok_and(|n| n.ends_with("/top_level.txt"))
+            })
+        })
         .collect::<FuturesUnordered<_>>()
         .try_collect::<Vec<_>>()
         .await?;
@@ -87,18 +93,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[tracing::instrument(fields(pkg_loc = %pkg_loc))]
-async fn extract(pkg_loc: PkgLoc) -> Result<(PackageName, Vec<String>)> {
+#[tracing::instrument(skip(predicate), fields(pkg_loc = %pkg_loc))]
+async fn extract(
+    pkg_loc: PkgLoc,
+    predicate: fn(&StoredZipEntry) -> bool,
+) -> Result<(PackageName, Vec<String>)> {
     let (name, reader) = pkg_reader(pkg_loc).await?;
     let buf_reader = BufReader::new(reader);
     let mut zip_reader = ZipFileReader::new(buf_reader)
         .instrument(tracing::info_span!("create_zip_reader"))
         .await?;
-    let Some(idx_entry) = find_entry(&mut zip_reader, |e| {
-        e.filename()
-            .as_str()
-            .is_ok_and(|n| n.ends_with("/top_level.txt"))
-    }) else {
+    let Some(idx_entry) = find_entry(&mut zip_reader, predicate) else {
         return Ok((name, Vec::new()));
     };
     let mut buf = String::new();
@@ -150,7 +155,7 @@ async fn find_wheel(
     name: &PackageName,
     version_spec: Option<pep440_rs::VersionSpecifier>,
 ) -> Result<simple_repo_api::File> {
-    fetch_project(client, &name)
+    fetch_project(client, name)
         .await?
         .files
         .into_iter()
