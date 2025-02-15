@@ -5,7 +5,7 @@ use std::{path::PathBuf, str::FromStr};
 use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
-use color_eyre::eyre::{ContextCompat, Error, Result};
+use color_eyre::eyre::{Context, ContextCompat, Error, Result};
 use reqwest::header::HeaderMap;
 use tokio::io::{AsyncRead, AsyncSeek};
 
@@ -95,16 +95,8 @@ async fn find_wheel(
     name: PackageName,
     version_spec: Option<pep440_rs::VersionSpecifier>,
 ) -> Result<simple_repo_api::File> {
-    let pkg: Project = client
-        .get(format!("https://pypi.org/simple/{name}/"))
-        .header("Accept", "application/vnd.pypi.simple.v1+json")
-        .send()
+    fetch_project(client, &name)
         .await?
-        .error_for_status()?
-        .json()
-        .await?;
-
-    let (_, whl) = pkg
         .files
         .into_iter()
         .filter_map(|p| {
@@ -120,7 +112,18 @@ async fn find_wheel(
             }
         })
         .max_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version))
-        .context("No wheel found")?;
+        .map(|(_, whl)| whl)
+        .with_context(|| format!("No wheel found for {name} {version_spec:?}"))
+}
 
-    Ok(whl)
+async fn fetch_project(client: &reqwest::Client, name: &PackageName) -> Result<Project, Error> {
+    client
+        .get(format!("https://pypi.org/simple/{name}/"))
+        .header("Accept", "application/vnd.pypi.simple.v1+json")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("Failed to parse JSON")
 }
