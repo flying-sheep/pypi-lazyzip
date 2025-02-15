@@ -4,6 +4,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
 use async_zip::base::read::seek::ZipFileReader;
+use async_zip::StoredZipEntry;
 use clap::Parser;
 use color_eyre::eyre::{Context as _, ContextCompat, Error, Result};
 use futures_lite::io::BufReader;
@@ -72,7 +73,11 @@ async fn main() -> Result<()> {
     let mut zip_reader = ZipFileReader::new(buf_reader)
         .instrument(tracing::info_span!("create_zip_reader"))
         .await?;
-    let idx_entry = find_entry(&mut zip_reader)?;
+    let idx_entry = find_entry(&mut zip_reader, |e| {
+        e.filename()
+            .as_str()
+            .is_ok_and(|n| n.ends_with("/top_level.txt"))
+    })?;
     let mut buf = String::new();
     read_entry(&mut zip_reader, idx_entry, &mut buf).await?;
     println!("{buf}");
@@ -119,22 +124,21 @@ async fn find_wheel(
         .into_iter()
         .filter_map(|p| {
             let n = WheelFilename::from_str(&p.filename).ok()?;
-            if !&p.yanked
+            let is_valid = !&p.yanked
                 && version_spec
                     .as_ref()
-                    .is_none_or(|version_spec| version_spec.contains(&n.version))
-            {
-                Some((n, p))
-            } else {
-                None
-            }
+                    .is_none_or(|version_spec| version_spec.contains(&n.version));
+            is_valid.then_some((n, p))
         })
         .max_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version))
         .map(|(_, whl)| whl)
         .with_context(|| format!("No wheel found for {name} {version_spec:?}"))
 }
 
-fn find_entry<R>(reader: &mut ZipFileReader<R>) -> Result<usize>
+fn find_entry<R>(
+    reader: &mut ZipFileReader<R>,
+    predicate: fn(&StoredZipEntry) -> bool,
+) -> Result<usize>
 where
     R: AsyncBufRead + AsyncSeek + Unpin,
 {
@@ -143,13 +147,9 @@ where
         .entries()
         .iter()
         .enumerate()
-        .find(|(_, e)| {
-            e.filename()
-                .as_str()
-                .is_ok_and(|n| n.ends_with("/top_level.txt"))
-        })
+        .find(|(_, e)| predicate(e))
         .map(|(i, _)| i)
-        .context("No top_level.txt file found")
+        .context("No entry matching predicate found")
 }
 
 #[tracing::instrument(skip(reader, buf))]
