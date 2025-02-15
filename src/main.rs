@@ -26,6 +26,19 @@ enum PkgLoc {
     Path(PathBuf),
 }
 
+impl std::fmt::Display for PkgLoc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PkgLoc::Name(name, version_spec) => {
+                name.fmt(f)?;
+                version_spec.as_ref().map(|vs| vs.fmt(f)).transpose()?;
+                Ok(())
+            }
+            PkgLoc::Path(path) => path.display().fmt(f),
+        }
+    }
+}
+
 impl FromStr for PkgLoc {
     type Err = Error;
 
@@ -43,10 +56,6 @@ struct Cli {
     pkg_loc: PkgLoc,
 }
 
-trait AsyncRS: AsyncRead + AsyncSeek + Unpin {}
-
-impl<R> AsyncRS for R where R: AsyncRead + AsyncSeek + Unpin {}
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     color_eyre::install()?;
@@ -58,7 +67,25 @@ async fn main() -> Result<()> {
 
     let args = Cli::try_parse()?;
 
-    let reader: Box<dyn AsyncRS> = match args.pkg_loc {
+    let reader = pkg_reader(args.pkg_loc).await?;
+    let buf_reader = BufReader::new(reader);
+    let mut zip_reader = ZipFileReader::new(buf_reader)
+        .instrument(tracing::info_span!("create_zip_reader"))
+        .await?;
+    let idx_entry = find_entry(&mut zip_reader)?;
+    let mut buf = String::new();
+    read_entry(&mut zip_reader, idx_entry, &mut buf).await?;
+    println!("{buf}");
+    Ok(())
+}
+
+trait AsyncRS: AsyncRead + AsyncSeek + Unpin {}
+
+impl<R> AsyncRS for R where R: AsyncRead + AsyncSeek + Unpin {}
+
+#[tracing::instrument(fields(pkg_loc = %pkg_loc))]
+async fn pkg_reader(pkg_loc: PkgLoc) -> Result<Box<dyn AsyncRS>> {
+    match pkg_loc {
         PkgLoc::Name(name, version_spec) => {
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
             let whl = find_wheel(&client, name, version_spec)
@@ -72,22 +99,13 @@ async fn main() -> Result<()> {
             )
             .instrument(tracing::info_span!("create_range_reader"))
             .await?;
-            Box::new(reader.compat())
+            Ok(Box::new(reader.compat()))
         }
         PkgLoc::Path(path) => {
             let reader = tokio::fs::File::open(path).await?;
-            Box::new(reader.compat())
+            Ok(Box::new(reader.compat()))
         }
-    };
-    let buf_reader = BufReader::new(reader);
-    let mut zip_reader = ZipFileReader::new(buf_reader)
-        .instrument(tracing::info_span!("create_zip_reader"))
-        .await?;
-    let idx_entry = find_entry(&mut zip_reader)?;
-    let mut buf = String::new();
-    read_entry(&mut zip_reader, idx_entry, &mut buf).await?;
-    println!("{buf}");
-    Ok(())
+    }
 }
 
 async fn find_wheel(
