@@ -8,7 +8,7 @@ use async_zip::StoredZipEntry;
 use clap::Parser;
 use color_eyre::eyre::{Context as _, ContextCompat, Error, Result};
 use futures::io::BufReader;
-use futures::stream::FuturesOrdered;
+use futures::stream::FuturesUnordered;
 use futures::{AsyncBufRead, AsyncRead, AsyncSeek, TryStreamExt as _};
 use reqwest::header::HeaderMap;
 use tokio_util::compat::TokioAsyncReadCompatExt as _;
@@ -73,17 +73,23 @@ async fn main() -> Result<()> {
         .pkg_locs
         .into_iter()
         .map(extract)
-        .collect::<FuturesOrdered<_>>()
+        .collect::<FuturesUnordered<_>>()
         .try_collect::<Vec<_>>()
         .await?;
 
-    serde_json::to_writer(std::io::stdout(), &contents)?;
+    serde_json::to_writer(
+        std::io::stdout(),
+        &contents
+            .into_iter()
+            .map(|(name, lines)| (name.to_string(), serde_json::Value::from(lines)))
+            .collect::<serde_json::Map<_, _>>(),
+    )?;
     Ok(())
 }
 
 #[tracing::instrument(fields(pkg_loc = %pkg_loc))]
-async fn extract(pkg_loc: PkgLoc) -> Result<Vec<String>> {
-    let reader = pkg_reader(pkg_loc).await?;
+async fn extract(pkg_loc: PkgLoc) -> Result<(PackageName, Vec<String>)> {
+    let (name, reader) = pkg_reader(pkg_loc).await?;
     let buf_reader = BufReader::new(reader);
     let mut zip_reader = ZipFileReader::new(buf_reader)
         .instrument(tracing::info_span!("create_zip_reader"))
@@ -93,15 +99,15 @@ async fn extract(pkg_loc: PkgLoc) -> Result<Vec<String>> {
             .as_str()
             .is_ok_and(|n| n.ends_with("/top_level.txt"))
     }) else {
-        return Ok(Vec::new());
+        return Ok((name, Vec::new()));
     };
     let mut buf = String::new();
     read_entry(&mut zip_reader, idx_entry, &mut buf).await?;
-    let v = buf
+    let lines = buf
         .split_terminator('\n')
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
-    Ok(v)
+    Ok((name, lines))
 }
 
 trait AsyncRS: AsyncRead + AsyncSeek + Unpin {}
@@ -109,11 +115,11 @@ trait AsyncRS: AsyncRead + AsyncSeek + Unpin {}
 impl<R> AsyncRS for R where R: AsyncRead + AsyncSeek + Unpin {}
 
 #[tracing::instrument(skip_all)]
-async fn pkg_reader(pkg_loc: PkgLoc) -> Result<Box<dyn AsyncRS>> {
+async fn pkg_reader(pkg_loc: PkgLoc) -> Result<(PackageName, Box<dyn AsyncRS>)> {
     match pkg_loc {
         PkgLoc::Name(name, version_spec) => {
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
-            let whl = find_wheel(&client, name, version_spec)
+            let whl = find_wheel(&client, &name, version_spec)
                 .instrument(tracing::info_span!("find_wheel"))
                 .await?;
             let (reader, _headers) = AsyncHttpRangeReader::new(
@@ -124,18 +130,24 @@ async fn pkg_reader(pkg_loc: PkgLoc) -> Result<Box<dyn AsyncRS>> {
             )
             .instrument(tracing::info_span!("create_range_reader"))
             .await?;
-            Ok(Box::new(reader.compat()))
+            Ok((name, Box::new(reader.compat())))
         }
         PkgLoc::Path(path) => {
+            let name = PackageName::from_str(
+                path.file_name()
+                    .context("file without name")?
+                    .to_str()
+                    .context("file name not UTF-8")?,
+            )?;
             let reader = tokio::fs::File::open(path).await?;
-            Ok(Box::new(reader.compat()))
+            Ok((name, Box::new(reader.compat())))
         }
     }
 }
 
 async fn find_wheel(
     client: &reqwest::Client,
-    name: PackageName,
+    name: &PackageName,
     version_spec: Option<pep440_rs::VersionSpecifier>,
 ) -> Result<simple_repo_api::File> {
     fetch_project(client, &name)

@@ -2,10 +2,20 @@ use std::{fmt::Display, str::FromStr, sync::LazyLock};
 
 use caseless::Caseless;
 use color_eyre::eyre::{bail, Context as _, Error, OptionExt as _, Result};
+use serde::Serialize;
 
 /// A Python package name, normalized for comparison.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageName(String);
+
+impl Serialize for PackageName {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
 
 /// Regex matching strings that start with valid Python package identifiers
 static ID_START_RE: LazyLock<regex::Regex> =
