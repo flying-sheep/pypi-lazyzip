@@ -3,6 +3,7 @@ use std::{fmt::Display, str::FromStr, sync::LazyLock};
 use caseless::Caseless;
 use color_eyre::eyre::{bail, Context as _, Error, OptionExt as _, Result};
 
+/// A Python package name, normalized for comparison.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageName(String);
 
@@ -39,6 +40,7 @@ impl Display for PackageName {
     }
 }
 
+/// A wheel filename, partially parsed.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WheelFilename {
     pub name: PackageName,
@@ -53,6 +55,7 @@ impl FromStr for WheelFilename {
         let stem = filename
             .strip_suffix(".whl")
             .ok_or_eyre("not a .whl file")?;
+        // `tags` will contain 3-4 `-`s (build tag is optional)
         let &[name, version, tags] = stem.splitn(3, '-').collect::<Vec<_>>().as_slice() else {
             bail!("invalid wheel filename: {stem}");
         };

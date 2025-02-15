@@ -10,10 +10,10 @@ use reqwest::header::HeaderMap;
 use tokio::io::{AsyncRead, AsyncSeek};
 
 use crate::pkg_name::{parse_dependency, PackageName, WheelFilename};
-use crate::pypi::Package;
+use crate::simple_repo_api::Project;
 
 mod pkg_name;
-mod pypi;
+mod simple_repo_api;
 
 #[derive(Debug, Clone)]
 enum PkgLoc {
@@ -94,8 +94,8 @@ async fn find_wheel(
     client: &reqwest::Client,
     name: PackageName,
     version_spec: Option<pep440_rs::VersionSpecifier>,
-) -> Result<pypi::File> {
-    let pkg: Package = client
+) -> Result<simple_repo_api::File> {
+    let pkg: Project = client
         .get(format!("https://pypi.org/simple/{name}/"))
         .header("Accept", "application/vnd.pypi.simple.v1+json")
         .send()
