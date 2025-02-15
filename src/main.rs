@@ -69,16 +69,15 @@ async fn main() -> Result<()> {
 
     let args = Cli::try_parse()?;
 
+    let is_top_level = |e: &StoredZipEntry| {
+        e.filename()
+            .as_str()
+            .is_ok_and(|n| n.ends_with("/top_level.txt"))
+    };
     let contents = args
         .pkg_locs
         .into_iter()
-        .map(|e| {
-            extract(e, |e| {
-                e.filename()
-                    .as_str()
-                    .is_ok_and(|n| n.ends_with("/top_level.txt"))
-            })
-        })
+        .map(|e| extract(e, is_top_level))
         .collect::<FuturesUnordered<_>>()
         .try_collect::<Vec<_>>()
         .await?;
