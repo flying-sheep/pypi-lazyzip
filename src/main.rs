@@ -5,9 +5,11 @@ use std::{path::PathBuf, str::FromStr};
 use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
-use color_eyre::eyre::{ContextCompat, Error, Result};
+use color_eyre::eyre::{Context as _, ContextCompat, Error, Result};
 use reqwest::header::HeaderMap;
 use tokio::io::{AsyncRead, AsyncSeek};
+use tracing::instrument::Instrument as _;
+use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
 use crate::pkg_name::{parse_dependency, PackageName, WheelFilename};
@@ -48,6 +50,8 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
+        .with_span_events(FmtSpan::CLOSE | FmtSpan::NEW)
+        .with_writer(std::io::stderr)
         .init();
 
     let args = Cli::try_parse()?;
@@ -55,13 +59,16 @@ async fn main() -> Result<()> {
     let reader: Box<dyn AsyncRS> = match args.pkg_loc {
         PkgLoc::Name(name, version_spec) => {
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
-            let whl = find_wheel(&client, name, version_spec).await?;
+            let whl = find_wheel(&client, name, version_spec)
+                .instrument(tracing::info_span!("find_wheel"))
+                .await?;
             let (reader, _headers) = AsyncHttpRangeReader::new(
                 client,
                 whl.url,
                 CheckSupportMethod::Head,
                 HeaderMap::new(),
             )
+            .instrument(tracing::info_span!("create_range_reader"))
             .await?;
             Box::new(reader)
         }
@@ -71,8 +78,10 @@ async fn main() -> Result<()> {
         }
     };
     let buf_reader = tokio::io::BufReader::new(reader);
-    let mut r = ZipFileReader::with_tokio(buf_reader).await?;
-    let idx_entry = r
+    let mut zip_reader = ZipFileReader::with_tokio(buf_reader)
+        .instrument(tracing::info_span!("create_zip_reader"))
+        .await?;
+    let idx_entry = zip_reader
         .file()
         .entries()
         .iter()
@@ -86,10 +95,7 @@ async fn main() -> Result<()> {
         .context("No top_level.txt file found")?;
 
     let mut buf = String::new();
-    r.reader_with_entry(idx_entry)
-        .await?
-        .read_to_string_checked(&mut buf)
-        .await?;
+    read_entry(&mut zip_reader, idx_entry, &mut buf).await?;
     println!("{buf}");
     Ok(())
 }
@@ -118,4 +124,19 @@ async fn find_wheel(
         .max_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version))
         .map(|(_, whl)| whl)
         .with_context(|| format!("No wheel found for {name} {version_spec:?}"))
+}
+
+#[tracing::instrument(skip(reader, buf))]
+async fn read_entry<R>(reader: &mut ZipFileReader<R>, idx: usize, buf: &mut String) -> Result<usize>
+where
+    R: futures_lite::io::AsyncBufRead + futures_lite::io::AsyncSeek + Unpin,
+{
+    reader
+        .reader_with_entry(idx)
+        .instrument(tracing::info_span!("create_entry_reader"))
+        .await?
+        .read_to_string_checked(buf)
+        .instrument(tracing::info_span!("read_to_string"))
+        .await
+        .context("Failed to read entry")
 }
