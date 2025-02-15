@@ -8,6 +8,7 @@ use clap::Parser;
 use color_eyre::eyre::{ContextCompat, Error, Result};
 use reqwest::header::HeaderMap;
 use tokio::io::{AsyncRead, AsyncSeek};
+use tracing_subscriber::EnvFilter;
 
 use crate::pkg_name::{parse_dependency, PackageName, WheelFilename};
 use crate::simple_repo_api::fetch_project;
@@ -45,6 +46,9 @@ impl<R> AsyncRS for R where R: AsyncRead + AsyncSeek + Unpin {}
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     let args = Cli::try_parse()?;
 
