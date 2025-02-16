@@ -24,14 +24,14 @@ mod simple_repo_api;
 
 #[derive(Debug, Clone)]
 enum PkgLoc {
-    Name(Dependency),
+    Dependency(Dependency),
     Path(PathBuf),
 }
 
 impl std::fmt::Display for PkgLoc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PkgLoc::Name(dep) => {
+            PkgLoc::Dependency(dep) => {
                 dep.name().fmt(f)?;
                 dep.version_spec().map(|vs| vs.fmt(f)).transpose()?;
                 Ok(())
@@ -46,7 +46,7 @@ impl FromStr for PkgLoc {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Ok(dep) = Dependency::from_str(s) {
-            Ok(PkgLoc::Name(dep))
+            Ok(PkgLoc::Dependency(dep))
         } else {
             Ok(PkgLoc::Path(PathBuf::from(s)))
         }
@@ -121,7 +121,7 @@ impl<R> AsyncRS for R where R: AsyncRead + AsyncSeek + Unpin {}
 #[tracing::instrument(skip_all)]
 async fn pkg_reader(pkg_loc: PkgLoc) -> Result<(PackageName, Box<dyn AsyncRS>)> {
     match pkg_loc {
-        PkgLoc::Name(dep) => {
+        PkgLoc::Dependency(dep) => {
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
             let whl = find_wheel(&client, &dep)
                 .instrument(tracing::info_span!("find_wheel"))
