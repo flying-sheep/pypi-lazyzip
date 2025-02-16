@@ -1,12 +1,12 @@
 #![deny(clippy::pedantic)]
 
-use std::{path::PathBuf, str::FromStr};
+use std::str::FromStr;
 
 use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
 use async_zip::base::read::seek::ZipFileReader;
 use async_zip::StoredZipEntry;
 use clap::Parser;
-use color_eyre::eyre::{Context as _, ContextCompat, Error, Result};
+use color_eyre::eyre::{Context as _, ContextCompat, Result};
 use futures::io::BufReader;
 use futures::stream::FuturesUnordered;
 use futures::{AsyncBufRead, AsyncRead, AsyncSeek, TryStreamExt as _};
@@ -16,47 +16,13 @@ use tracing::instrument::Instrument as _;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
+use crate::cli::{Cli, PkgLoc};
 use crate::python_pkg::{Dependency, PackageName, WheelFilename};
 use crate::simple_repo_api::fetch_project;
 
+mod cli;
 mod python_pkg;
 mod simple_repo_api;
-
-#[derive(Debug, Clone)]
-enum PkgLoc {
-    Dependency(Dependency),
-    Path(PathBuf),
-}
-
-impl std::fmt::Display for PkgLoc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PkgLoc::Dependency(dep) => {
-                dep.name().fmt(f)?;
-                dep.version_spec().map(|vs| vs.fmt(f)).transpose()?;
-                Ok(())
-            }
-            PkgLoc::Path(path) => path.display().fmt(f),
-        }
-    }
-}
-
-impl FromStr for PkgLoc {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(dep) = Dependency::from_str(s) {
-            Ok(PkgLoc::Dependency(dep))
-        } else {
-            Ok(PkgLoc::Path(PathBuf::from(s)))
-        }
-    }
-}
-
-#[derive(clap::Parser)]
-struct Cli {
-    pkg_locs: Vec<PkgLoc>,
-}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -69,6 +35,10 @@ async fn main() -> Result<()> {
 
     let args = Cli::try_parse()?;
 
+    run(args).await
+}
+
+async fn run(args: Cli) -> Result<()> {
     let is_top_level = |e: &StoredZipEntry| {
         e.filename()
             .as_str()
@@ -89,6 +59,7 @@ async fn main() -> Result<()> {
             .map(|(name, lines)| (name.into(), lines.into()))
             .collect::<serde_json::Map<_, _>>(),
     )?;
+
     Ok(())
 }
 
