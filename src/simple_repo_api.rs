@@ -1,6 +1,6 @@
 use color_eyre::eyre::{Context as _, Error};
 
-use crate::pkg_name::PackageName;
+use crate::python_pkg::PackageName;
 
 mod spec;
 

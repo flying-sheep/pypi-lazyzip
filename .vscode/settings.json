@@ -15,4 +15,5 @@
     "notebook.formatOnSave.enabled": true,
     "python.analysis.typeCheckingMode": "basic",
     "rust-analyzer.check.command": "clippy",
+    "explorer.sortOrder": "mixed",
 }

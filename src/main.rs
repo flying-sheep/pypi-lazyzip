@@ -16,10 +16,10 @@ use tracing::instrument::Instrument as _;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
-use crate::pkg_name::{Dependency, PackageName, WheelFilename};
+use crate::python_pkg::{Dependency, PackageName, WheelFilename};
 use crate::simple_repo_api::fetch_project;
 
-mod pkg_name;
+mod python_pkg;
 mod simple_repo_api;
 
 #[derive(Debug, Clone)]
