@@ -164,7 +164,7 @@ async fn find_wheel(client: &reqwest::Client, dep: &Dependency) -> Result<simple
         })
         .max_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version))
         .map(|(_, whl)| whl)
-        .with_context(|| format!("No wheel found for {} {:?}", dep.name(), dep.version_spec()))
+        .with_context(|| format!("No wheel found for {dep}"))
 }
 
 fn find_entry<R>(

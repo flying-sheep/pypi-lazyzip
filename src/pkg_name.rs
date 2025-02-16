@@ -134,6 +134,14 @@ impl FromStr for Dependency {
     }
 }
 
+impl Display for Dependency {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(f)?;
+        self.version_spec().map(|vs| vs.fmt(f)).transpose()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
