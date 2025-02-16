@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
         std::io::stdout(),
         &contents
             .into_iter()
-            .map(|(name, lines)| (name.to_string(), serde_json::Value::from(lines)))
+            .map(|(name, lines)| (name.into(), lines.into()))
             .collect::<serde_json::Map<_, _>>(),
     )?;
     Ok(())
