@@ -16,7 +16,7 @@ use tracing::instrument::Instrument as _;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
-use crate::pkg_name::{parse_dependency, PackageName, WheelFilename};
+use crate::pkg_name::{Dependency, PackageName, WheelFilename};
 use crate::simple_repo_api::fetch_project;
 
 mod pkg_name;
@@ -24,16 +24,16 @@ mod simple_repo_api;
 
 #[derive(Debug, Clone)]
 enum PkgLoc {
-    Name(PackageName, Option<pep440_rs::VersionSpecifier>),
+    Name(Dependency),
     Path(PathBuf),
 }
 
 impl std::fmt::Display for PkgLoc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PkgLoc::Name(name, version_spec) => {
-                name.fmt(f)?;
-                version_spec.as_ref().map(|vs| vs.fmt(f)).transpose()?;
+            PkgLoc::Name(dep) => {
+                dep.name().fmt(f)?;
+                dep.version_spec().map(|vs| vs.fmt(f)).transpose()?;
                 Ok(())
             }
             PkgLoc::Path(path) => path.display().fmt(f),
@@ -45,8 +45,8 @@ impl FromStr for PkgLoc {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok((name, version_spec)) = parse_dependency(s) {
-            Ok(PkgLoc::Name(name, version_spec))
+        if let Ok(dep) = Dependency::from_str(s) {
+            Ok(PkgLoc::Name(dep))
         } else {
             Ok(PkgLoc::Path(PathBuf::from(s)))
         }
@@ -121,9 +121,9 @@ impl<R> AsyncRS for R where R: AsyncRead + AsyncSeek + Unpin {}
 #[tracing::instrument(skip_all)]
 async fn pkg_reader(pkg_loc: PkgLoc) -> Result<(PackageName, Box<dyn AsyncRS>)> {
     match pkg_loc {
-        PkgLoc::Name(name, version_spec) => {
+        PkgLoc::Name(dep) => {
             let client = reqwest::Client::new(); //.builder().http2_prior_knowledge().build()?
-            let whl = find_wheel(&client, &name, version_spec)
+            let whl = find_wheel(&client, &dep)
                 .instrument(tracing::info_span!("find_wheel"))
                 .await?;
             let (reader, _headers) = AsyncHttpRangeReader::new(
@@ -134,7 +134,7 @@ async fn pkg_reader(pkg_loc: PkgLoc) -> Result<(PackageName, Box<dyn AsyncRS>)> 
             )
             .instrument(tracing::info_span!("create_range_reader"))
             .await?;
-            Ok((name, Box::new(reader.compat())))
+            Ok((dep.into_name(), Box::new(reader.compat())))
         }
         PkgLoc::Path(path) => {
             let name = PackageName::from_str(
@@ -149,26 +149,22 @@ async fn pkg_reader(pkg_loc: PkgLoc) -> Result<(PackageName, Box<dyn AsyncRS>)> 
     }
 }
 
-async fn find_wheel(
-    client: &reqwest::Client,
-    name: &PackageName,
-    version_spec: Option<pep440_rs::VersionSpecifier>,
-) -> Result<simple_repo_api::File> {
-    fetch_project(client, name)
+async fn find_wheel(client: &reqwest::Client, dep: &Dependency) -> Result<simple_repo_api::File> {
+    fetch_project(client, dep.name())
         .await?
         .files
         .into_iter()
         .filter_map(|p| {
             let n = WheelFilename::from_str(&p.filename).ok()?;
             let is_valid = !&p.yanked
-                && version_spec
-                    .as_ref()
+                && dep
+                    .version_spec()
                     .is_none_or(|version_spec| version_spec.contains(&n.version));
             is_valid.then_some((n, p))
         })
         .max_by(|(name_l, _), (name_r, _)| name_l.version.cmp(&name_r.version))
         .map(|(_, whl)| whl)
-        .with_context(|| format!("No wheel found for {name} {version_spec:?}"))
+        .with_context(|| format!("No wheel found for {} {:?}", dep.name(), dep.version_spec()))
 }
 
 fn find_entry<R>(
