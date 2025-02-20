@@ -1,10 +1,10 @@
 #![deny(clippy::pedantic)]
 
-use std::str::FromStr;
+use std::str::FromStr as _;
 
 use async_http_range_reader::{AsyncHttpRangeReader, CheckSupportMethod};
-use async_zip::base::read::seek::ZipFileReader;
 use async_zip::StoredZipEntry;
+use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
 use color_eyre::eyre::{Context as _, ContextCompat, Result};
 use futures::io::BufReader;
@@ -13,8 +13,8 @@ use futures::{AsyncBufRead, AsyncRead, AsyncSeek, TryStreamExt as _};
 use reqwest::header::HeaderMap;
 use tokio_util::compat::TokioAsyncReadCompatExt as _;
 use tracing::instrument::Instrument as _;
-use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 use crate::cli::{Cli, PkgLoc};
 use crate::python_pkg::{Dependency, PackageName, WheelFilename};

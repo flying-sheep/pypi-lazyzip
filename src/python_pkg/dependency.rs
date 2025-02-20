@@ -1,8 +1,8 @@
 use std::{fmt::Display, str::FromStr};
 
-use color_eyre::eyre::{bail, Context as _, Error};
+use color_eyre::eyre::{Context as _, Error, bail};
 
-use super::package_name::{PackageName, ID_START_RE};
+use super::package_name::{ID_START_RE, PackageName};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Dependency {

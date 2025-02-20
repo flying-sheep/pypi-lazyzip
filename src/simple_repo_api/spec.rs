@@ -4,7 +4,7 @@ use color_eyre::eyre::Result;
 use either::Either;
 use reqwest::Url;
 use serde::{Deserialize, Deserializer};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 
 /// A project on the simple API.
 /// See [spec](https://packaging.python.org/en/latest/specifications/simple-repository-api/#project-detail).

@@ -1,7 +1,7 @@
 use std::{fmt::Display, str::FromStr, sync::LazyLock};
 
 use caseless::Caseless;
-use color_eyre::eyre::{bail, Error};
+use color_eyre::eyre::{Error, bail};
 use serde::Serialize;
 
 /// A Python package name, normalized for comparison.

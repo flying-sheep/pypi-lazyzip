@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use color_eyre::eyre::{bail, Error, OptionExt as _, Result};
+use color_eyre::eyre::{Error, OptionExt as _, Result, bail};
 
 pub use super::package_name::PackageName;
 
