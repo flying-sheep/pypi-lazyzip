@@ -88,6 +88,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
+name = "astral_async_zip"
+version = "0.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab72a761e6085828cc8f0e05ed332b2554701368c5dc54de551bfaec466518ba"
+dependencies = [
+ "async-compression",
+ "crc32fast",
+ "futures-lite",
+ "pin-project",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "async-compression"
 version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -128,20 +143,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "async_zip"
-version = "0.0.17"
-source = "git+https://github.com/charliermarsh/rs-async-zip?rev=c909fda63fcafe4af496a07bfda28a5aae97e58d#c909fda63fcafe4af496a07bfda28a5aae97e58d"
-dependencies = [
- "async-compression",
- "crc32fast",
- "futures-lite",
- "pin-project",
- "thiserror",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -383,7 +384,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1041,8 +1042,8 @@ dependencies = [
 name = "pypi-lazyzip"
 version = "0.1.0"
 dependencies = [
+ "astral_async_zip",
  "async_http_range_reader",
- "async_zip",
  "caseless",
  "clap",
  "color-eyre",
@@ -1195,7 +1196,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1470,7 +1471,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
